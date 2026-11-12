@@ -31,7 +31,7 @@ local QUART  = Enum.EasingStyle.Quart
 local QUINT  = Enum.EasingStyle.Quint
 local BACK   = Enum.EasingStyle.Back
 local OUT    = Enum.EasingDirection.Out
-local IN     = Enum.EasingDirection.`In`
+local IN     = Enum.EasingDirection.In
 
 local function new(class, props)
 	local inst = Instance.new(class)
