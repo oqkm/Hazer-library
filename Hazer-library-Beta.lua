@@ -1,10 +1,69 @@
 --[========================================================================]--
 --                                                                          --
---                         HAZER UI LIBRARY  v2.0.1                         --
+--                         HAZER UI LIBRARY  v2.0.0                         --
 --          Clean rebuild: iOS "Liquid Glass" look, overlay dropdowns,      --
 --          and a tiny settings file (theme + menu keybind only).           --
---          Fixed: UI alignment, padding, margins, and notification bounds. --
+--          It ships with NO features and NO buttons: you add every page    --
+--          and button yourself.                                            --
 --                                                                          --
+--[========================================================================]--
+--
+--  QUICK START
+--  -----------
+--    local Library = loadstring(game:HttpGet("https://YOUR-RAW-LINK"))()
+--
+--    local Hub = Library:CreateWindow({ Name = "Hazer", Subtitle = "Hub 6.0" })
+--
+--    Hub:AddNav("Home", "Home")
+--    Hub:AddNav("MM2", "Murder Mystery 2")
+--
+--    Hub:AddToggle("ESP", "Highlight around players", "MM2", function(on)
+--        print("ESP:", on)
+--    end)
+--
+--    -- Same thing in the short "Name, Description, Nav" style:
+--    Hub:AddToggle("ESP, Highlight around players, MM2", function(on) end)
+--
+--  EVERYTHING YOU CAN ADD  (nav id is always the id you gave to AddNav)
+--  ----------------------------------------------------------------------
+--    Hub:AddNav(id, title, subtitle)
+--    Hub:AddSection(nav, title)
+--    Hub:AddToggle(name, desc, nav, callback(on), default)
+--    Hub:AddButton(name, desc, nav, callback())
+--    Hub:AddSlider(name, desc, nav, min, max, default, callback(value))
+--    Hub:AddKeybind(name, desc, nav, defaultKey, callback(), onChanged(key))
+--    Hub:AddDropdown(name, desc, nav, {"A", "B"}, default, callback(option))
+--    Hub:AddInput(name, desc, nav, placeholder, callback(text), default)
+--    Hub:AddLabel(text, nav)
+--
+--  Every Add... call returns an object you can control later:
+--    toggle.Set(true) / toggle.Get()      slider.Set(80) / slider.Get()
+--    dropdown.Set("B") / dropdown.Refresh({...}, default)
+--    keybind.Set(Enum.KeyCode.F)          input.Set("text")
+--    label.SetText("new text")            button.Fire()
+--  (dot style or colon style both work)
+--  You can also find any of them later with  Hub.Elements["ESP"].
+--
+--  WINDOW CONTROL
+--  --------------
+--    Hub:Notify(title, message, seconds)   Hub:Open() / Hub:Close() / Hub:Toggle()
+--    Hub:Select(nav)                       Hub:SetAccent("Dusk" | "Lagoon" | "Orchid" | "Moss" | "Ember")
+--    Hub:OnUnload(function() ... end)      Hub:Track(connection)      Hub:Unload()
+--
+--  CreateWindow OPTIONS (all optional)
+--  -----------------------------------
+--    Name, Subtitle, ToggleKey (Enum.KeyCode), Accent, Width, Height,
+--    Splash (true), Launcher (true), Welcome (true or your own text)
+--
+--  Library:AddPreset(name, colorA, colorB)  adds your own accent pair
+--  (call it before CreateWindow so saved settings can find it).
+--
+--  SETTINGS FILE
+--  -------------
+--    HazerUI/settings.txt  (JSON). Stores ONLY the accent/background theme
+--    and the menu toggle keybind. Loaded on CreateWindow, saved whenever
+--    either one changes. Nothing else (toggles, sliders...) is ever saved.
+--
 --[========================================================================]--
 
 local Players          = game:GetService("Players")
@@ -14,7 +73,7 @@ local RunService       = game:GetService("RunService")
 local HttpService      = game:GetService("HttpService")
 local TextService      = game:GetService("TextService")
 
-local Library = { Version = "2.0.1", _windows = {}, _presets = {}, _presetOrder = {} }
+local Library = { Version = "2.0.0", _windows = {}, _presets = {}, _presetOrder = {} }
 local Window = {}
 Window.__index = Window
 
@@ -78,6 +137,7 @@ local function fire(cb, ...)
 	end)
 end
 
+-- allows both  obj.Set(x)  and  obj:Set(x)
 local function method(obj, fn)
 	return function(first, ...)
 		if first == obj then return fn(...) end
@@ -111,6 +171,7 @@ local function keyFromName(name)
 	return nil
 end
 
+-- Liquid-glass decoration: rounded corners, light-catching gradient stroke, soft sheen.
 local function glass(frame, radius, sheen)
 	new("UICorner", { CornerRadius = UDim.new(0, radius), Parent = frame })
 	local stroke = new("UIStroke", {
@@ -220,7 +281,7 @@ local function getGuiParent()
 end
 
 --------------------------------------------------------------------------------
--- Settings storage
+-- Settings storage (theme + menu keybind ONLY)
 --------------------------------------------------------------------------------
 local Storage = { Folder = "HazerUI", File = "HazerUI/settings.txt" }
 
@@ -351,18 +412,29 @@ end
 function Window:Open()
 	if self.Visible or self._unloaded then return end
 	self.Visible = true
+	local pos = self._restPos or self.Main.Position
+	self._restPos = nil
+	self.Main.Position = pos + UDim2.fromOffset(0, -46)
 	self.Main.Visible = true
 	self._scale.Scale = self._base * 0.9
 	tween(self._scale, 0.5, { Scale = self._base }, BACK, OUT)
+	tween(self.Main, 0.7, { Position = pos }, QUINT, OUT)
+	if self.Current then self:_enterPage(self.Current) end
 end
 
 function Window:Close()
 	if not self.Visible then return end
 	self.Visible = false
 	self:_closeDropdown(true)
-	tween(self._scale, 0.2, { Scale = self._base * 0.92 }, QUART, IN)
-	task.delay(0.2, function()
-		if not self.Visible and self.Main and self.Main.Parent then self.Main.Visible = false end
+	local pos = self.Main.Position
+	self._restPos = pos
+	tween(self._scale, 0.22, { Scale = self._base * 0.92 }, QUART, IN)
+	tween(self.Main, 0.22, { Position = pos + UDim2.fromOffset(0, -30) }, QUART, IN)
+	task.delay(0.22, function()
+		if not self.Visible and self.Main and self.Main.Parent then
+			self.Main.Visible = false
+			self.Main.Position = pos
+		end
 	end)
 end
 
@@ -439,10 +511,9 @@ function Window:_addNav(id, title, subtitle, pinned)
 	})
 	self:_bindColor(frame, "ScrollBarImageColor3", "A")
 	new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder, Parent = frame })
-	-- [تصحيح]: تعديل الهوامش لمنع التصاق العناصر وتجاوز الحواف
-	new("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 14), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 12), Parent = frame })
+	new("UIPadding", { PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 14), PaddingRight = UDim.new(0, 8), Parent = frame })
 
-	local page = { Id = id, Title = title, Subtitle = subtitle or "", Frame = frame, Button = btn, Order = 0 }
+	local page = { Id = id, Title = title, Subtitle = subtitle or "", Frame = frame, Button = btn, Order = 0, Items = {} }
 	page.Select = function() self:Select(id) end
 	page._style = function(selected)
 		tween(btn, 0.25, { BackgroundTransparency = selected and 0.88 or 1 })
@@ -456,6 +527,10 @@ function Window:_addNav(id, title, subtitle, pinned)
 	btn.MouseLeave:Connect(function()
 		if self.Current ~= page then tween(btn, 0.2, { BackgroundTransparency = 1 }) end
 	end)
+	local navScale = new("UIScale", { Parent = btn })
+	btn.MouseButton1Down:Connect(function() tween(navScale, 0.1, { Scale = 0.95 }) end)
+	btn.MouseButton1Up:Connect(function() tween(navScale, 0.9, { Scale = 1 }, Enum.EasingStyle.Elastic, OUT) end)
+	btn.MouseLeave:Connect(function() tween(navScale, 0.5, { Scale = 1 }, Enum.EasingStyle.Elastic, OUT) end)
 	btn.MouseButton1Click:Connect(function() self:Select(id) end)
 
 	self.Pages[id] = page
@@ -476,17 +551,74 @@ function Window:Select(nav)
 	if not p or self.Current == p then return end
 	self:_closeDropdown(true)
 	local old = self.Current
-	if old then
-		old.Frame.Visible = false
-		old._style(false)
-	end
 	self.Current = p
+	self._selToken = (self._selToken or 0) + 1
+	local token = self._selToken
+	if old then old._style(false) end
 	p._style(true)
-	p.Frame.Position = UDim2.fromOffset(0, 12)
-	p.Frame.Visible = true
-	tween(p.Frame, 0.4, { Position = UDim2.fromOffset(0, 0) }, QUINT, OUT)
+
+	-- title text drifts in
 	self._title.Text = p.Title
 	self._subtitle.Text = p.Subtitle
+	self._title.Position = UDim2.fromOffset(20, 22)
+	self._subtitle.Position = UDim2.fromOffset(20, 42)
+	self._title.TextTransparency = 1
+	self._subtitle.TextTransparency = 1
+	tween(self._title, 0.55, { Position = UDim2.fromOffset(20, 10), TextTransparency = 0 }, QUINT, OUT)
+	tween(self._subtitle, 0.65, { Position = UDim2.fromOffset(20, 32), TextTransparency = 0 }, QUINT, OUT)
+
+	local function show()
+		if self._selToken ~= token or self._unloaded then return end
+		for _, other in pairs(self.Pages) do
+			if other ~= p then
+				other.Frame.Visible = false
+				for _, it in ipairs(other.Items) do it.Position = UDim2.new() end
+			end
+		end
+		p.Frame.CanvasPosition = Vector2.zero
+		p.Frame.Visible = true
+		self:_enterPage(p)
+	end
+
+	if old and old.Frame.Visible then
+		self:_exitPage(old)
+		task.delay(0.24, show)
+	else
+		show()
+	end
+end
+
+-- YARHM-style exit: the first few rows slide out to the right, staggered.
+function Window:_exitPage(page)
+	self._springs = {}
+	for i, it in ipairs(page.Items) do
+		if i > 7 then break end
+		task.delay((i - 1) * 0.012, function()
+			if it.Parent then
+				tween(it, 0.2, { Position = UDim2.fromScale(1.15, 0) }, Enum.EasingStyle.Cubic, IN)
+			end
+		end)
+	end
+end
+
+-- YARHM-style entrance: rows fly in from the left on a bouncy spring, staggered.
+function Window:_enterPage(page)
+	self._springs = {}
+	local width = self._pageHolder.AbsoluteSize.X
+	if width <= 1 then width = (self._winW or 640) - 190 end
+	local startX = -(width / math.max(self._base, 0.3)) - 40
+	local now = os.clock()
+	for i, it in ipairs(page.Items) do
+		if i <= 8 then
+			it.Position = UDim2.fromOffset(startX, 0)
+			table.insert(self._springs, {
+				item = it, x = startX, v = 0, goal = 0,
+				k = 190, c = 21, start = now + (i - 1) * 0.035,
+			})
+		else
+			it.Position = UDim2.new()
+		end
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -497,11 +629,15 @@ function Window:_row(nav, name, desc, rightW, o)
 	local page = self:_page(nav)
 	local hasDesc = desc ~= nil and desc ~= ""
 	local h = o.height or (hasDesc and 56 or 44)
-	-- [تصحيح]: عرض الفريم مطابق تماماً للمساحة المتاحة (1, -4) لمنع خروجه من الحواف
+	local holder = new("Frame", {
+		Name = name .. "_Row", BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, h), LayoutOrder = nextOrder(page), Parent = page.Frame,
+	})
 	local card = new("TextButton", {
 		Name = name, Text = "", BackgroundColor3 = WHITE, BackgroundTransparency = 0.93,
-		Size = UDim2.new(1, -4, 0, h), LayoutOrder = nextOrder(page), Parent = page.Frame,
+		Size = UDim2.fromScale(1, 1), Parent = holder,
 	})
+	table.insert(page.Items, card)
 	local scale = new("UIScale", { Parent = card })
 	local top = hasDesc or o.top
 	local nameL = label({
@@ -520,11 +656,11 @@ function Window:_row(nav, name, desc, rightW, o)
 	card.MouseEnter:Connect(function() tween(card, 0.2, { BackgroundTransparency = 0.87 }) end)
 	card.MouseLeave:Connect(function()
 		tween(card, 0.25, { BackgroundTransparency = 0.93 })
-		if o.pressable then tween(scale, 0.3, { Scale = 1 }, BACK, OUT) end
+		if o.pressable then tween(scale, 0.6, { Scale = 1 }, Enum.EasingStyle.Elastic, OUT) end
 	end)
 	if o.pressable then
 		card.MouseButton1Down:Connect(function() tween(scale, 0.1, { Scale = 0.982 }) end)
-		card.MouseButton1Up:Connect(function() tween(scale, 0.4, { Scale = 1 }, BACK, OUT) end)
+		card.MouseButton1Up:Connect(function() tween(scale, 0.9, { Scale = 1 }, Enum.EasingStyle.Elastic, OUT) end)
 	end
 	return card, nameL, page
 end
@@ -534,7 +670,9 @@ end
 --------------------------------------------------------------------------------
 function Window:AddSection(nav, title)
 	local page = self:_page(nav)
-	local f = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 26), LayoutOrder = nextOrder(page), Parent = page.Frame })
+	local holder = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 26), LayoutOrder = nextOrder(page), Parent = page.Frame })
+	local f = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = holder })
+	table.insert(page.Items, f)
 	local pill = new("Frame", { BackgroundColor3 = WHITE, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 2, 0.5, 4), Size = UDim2.fromOffset(3, 12), Parent = f })
 	new("UICorner", { CornerRadius = UDim.new(1, 0), Parent = pill })
 	self:_bindGrad(new("UIGradient", { Rotation = 90, Parent = pill }))
@@ -546,11 +684,16 @@ end
 
 function Window:AddLabel(text, nav)
 	local page = self:_page(nav)
+	local holder = new("Frame", {
+		BackgroundTransparency = 1, AutomaticSize = Enum.AutomaticSize.Y,
+		Size = UDim2.new(1, 0, 0, 0), LayoutOrder = nextOrder(page), Parent = page.Frame,
+	})
 	local l = label({
 		Text = tostring(text), Font = FONT_R, TextSize = 12, TextColor3 = SUB, TextWrapped = true,
 		TextYAlignment = Enum.TextYAlignment.Top, AutomaticSize = Enum.AutomaticSize.Y,
-		Size = UDim2.new(1, -4, 0, 0), LayoutOrder = nextOrder(page), Parent = page.Frame,
+		Size = UDim2.new(1, 0, 0, 0), Parent = holder,
 	})
+	table.insert(page.Items, l)
 	new("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 2), Parent = l })
 	local obj = {}
 	obj.SetText = method(obj, function(t) l.Text = tostring(t) end)
@@ -814,7 +957,7 @@ function Window:AddInput(a, b, c, d, e, f)
 end
 
 --------------------------------------------------------------------------------
--- Dropdown
+-- Dropdown (rendered in a top-level overlay: never clipped, always above)
 --------------------------------------------------------------------------------
 function Window:AddDropdown(a, b, c, d, e, f)
 	local name, desc, nav, options, default, cb
@@ -1055,7 +1198,7 @@ function Window:_openDropdown(dd)
 end
 
 --------------------------------------------------------------------------------
--- Notifications (تصحيح المحاذاة والمظهر)
+-- Notifications
 --------------------------------------------------------------------------------
 function Window:Notify(title, message, seconds)
 	if self._unloaded then return end
@@ -1078,16 +1221,24 @@ function Window:Notify(title, message, seconds)
 	local bar = new("Frame", { BackgroundColor3 = WHITE, Position = UDim2.fromOffset(10, 11), Size = UDim2.new(0, 3, 1, -22), Parent = card })
 	new("UICorner", { CornerRadius = UDim.new(1, 0), Parent = bar })
 	new("UIGradient", { Rotation = 90, Color = ColorSequence.new(self.Theme.A, self.Theme.B), Parent = bar })
-	label({ Text = title, Font = FONT_B, TextSize = 13, TextTruncate = Enum.TextTruncate.AtEnd, Position = UDim2.fromOffset(22, 9), Size = UDim2.new(1, -34, 0, 18), Parent = card })
+	-- typewriter reveal (YARHM-style)
+	local titleL = label({
+		Text = title, Font = FONT_B, TextSize = 13, TextTruncate = Enum.TextTruncate.AtEnd, MaxVisibleGraphemes = 0,
+		Position = UDim2.fromOffset(22, 9), Size = UDim2.new(1, -34, 0, 18), Parent = card,
+	})
+	tween(titleL, math.clamp(#title * 0.03, 0.25, 0.7), { MaxVisibleGraphemes = utf8.len(title) or #title }, QUART, OUT)
 	if message ~= "" then
-		label({
+		local msgL = label({
 			Text = message, Font = FONT_R, TextSize = 12, TextColor3 = SUB, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top,
-			Position = UDim2.fromOffset(22, 29), Size = UDim2.new(1, -34, 0, textH), Parent = card,
+			MaxVisibleGraphemes = 0, Position = UDim2.fromOffset(22, 29), Size = UDim2.new(1, -34, 0, textH), Parent = card,
 		})
+		tween(msgL, math.clamp(#message * 0.012, 0.3, 0.9), { MaxVisibleGraphemes = utf8.len(message) or #message }, QUART, OUT)
 	end
 	local prog = new("Frame", { BackgroundColor3 = WHITE, BackgroundTransparency = 0.25, Position = UDim2.new(0, 0, 1, -2), Size = UDim2.new(1, 0, 0, 2), Parent = card })
 	new("UIGradient", { Color = ColorSequence.new(self.Theme.A, self.Theme.B), Parent = prog })
 
+	local pop = new("UIScale", { Scale = 0.85, Parent = card })
+	tween(pop, 0.7, { Scale = 1 }, BACK, OUT)
 	tween(card, 0.55, { Position = UDim2.fromOffset(0, 0) }, QUINT, OUT)
 	tween(prog, seconds, { Size = UDim2.new(0, 0, 0, 2) }, Enum.EasingStyle.Linear, OUT)
 	task.delay(seconds, function()
@@ -1118,7 +1269,9 @@ function Library:CreateWindow(opts)
 	self._navOrder = 0
 	self.Visible = false
 	self.Current = nil
+	self._springs = {}
 
+	-- load saved settings (theme + menu key only)
 	local saved = Storage.load()
 	local defaultKey = (typeof(opts.ToggleKey) == "EnumItem" and opts.ToggleKey) or Enum.KeyCode.RightShift
 	local defaultAccent = (opts.Accent and Library._presets[tostring(opts.Accent)]) and tostring(opts.Accent) or "Dusk"
@@ -1141,6 +1294,7 @@ function Library:CreateWindow(opts)
 	local preset = Library._presets[accentName]
 	self.Theme = { A = preset.A, B = preset.B, BG = computeBG(preset.A), Name = accentName }
 
+	-- gui root
 	local parent = getGuiParent()
 	local old = parent:FindFirstChild("HazerUI")
 	if old then old:Destroy() end
@@ -1152,6 +1306,7 @@ function Library:CreateWindow(opts)
 	gui.Parent = parent
 	self.Gui = gui
 
+	-- main window
 	local W, H = tonumber(opts.Width) or 640, tonumber(opts.Height) or 440
 	local cam = workspace.CurrentCamera
 	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
@@ -1163,9 +1318,24 @@ function Library:CreateWindow(opts)
 	})
 	self.Main = main
 	self._scale = new("UIScale", { Scale = self._base, Parent = main })
-	glass(main, 20, true)
+	self._winW = W
+	local mainStroke = glass(main, 20, true)
+	mainStroke.Thickness = 1.5
+	-- YARHM-style rotating border light, tinted by the accent theme
+	local mainGrad = mainStroke:FindFirstChildOfClass("UIGradient")
+	if mainGrad then
+		self:_bind(function(t)
+			mainGrad.Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, t.A),
+				ColorSequenceKeypoint.new(0.5, WHITE),
+				ColorSequenceKeypoint.new(1, t.B),
+			})
+		end)
+		TweenService:Create(mainGrad, TweenInfo.new(12, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1), { Rotation = 405 }):Play()
+	end
 	self:_bindColor(main, "BackgroundColor3", "BG")
 
+	-- soft accent glow blobs (liquid look)
 	local function glow(anchor, pos, size)
 		local g = new("Frame", {
 			BackgroundColor3 = WHITE, BackgroundTransparency = 0, AnchorPoint = anchor, Position = pos,
@@ -1184,6 +1354,7 @@ function Library:CreateWindow(opts)
 	self:_bindColor(glowA, "BackgroundColor3", "A")
 	self:_bindColor(glowB, "BackgroundColor3", "B")
 
+	-- sidebar
 	local sidebar = new("Frame", { Name = "Sidebar", BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.72, Size = UDim2.new(0, 170, 1, 0), Parent = main })
 	new("Frame", { BackgroundColor3 = WHITE, BackgroundTransparency = 0.92, Position = UDim2.new(1, -1, 0, 0), Size = UDim2.new(0, 1, 1, 0), Parent = sidebar })
 	local brand = label({ Text = self.Name, Font = FONT_B, TextSize = 20, TextColor3 = WHITE, Position = UDim2.fromOffset(18, 16), Size = UDim2.new(1, -30, 0, 26), Parent = sidebar })
@@ -1199,6 +1370,7 @@ function Library:CreateWindow(opts)
 	self._pinHolder = new("Frame", { BackgroundTransparency = 1, Position = UDim2.new(0, 10, 1, -54), Size = UDim2.new(1, -20, 0, 36), Parent = sidebar })
 	label({ Text = "v" .. Library.Version, Font = FONT_R, TextSize = 10, TextColor3 = SUB, TextTransparency = 0.4, Position = UDim2.new(0, 18, 1, -18), Size = UDim2.new(1, -30, 0, 14), Parent = sidebar })
 
+	-- content area
 	local content = new("Frame", { Name = "Content", BackgroundTransparency = 1, Position = UDim2.fromOffset(170, 0), Size = UDim2.new(1, -170, 1, 0), Parent = main })
 	local topbar = new("Frame", { Name = "Topbar", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 58), Parent = content })
 	self._title = label({ Text = "", Font = FONT_B, TextSize = 17, Position = UDim2.fromOffset(20, 10), Size = UDim2.new(1, -80, 0, 22), Parent = topbar })
@@ -1222,6 +1394,7 @@ function Library:CreateWindow(opts)
 
 	self._pageHolder = new("Frame", { Name = "Pages", BackgroundTransparency = 1, ClipsDescendants = true, Position = UDim2.fromOffset(16, 58), Size = UDim2.new(1, -24, 1, -70), Parent = content })
 
+	-- overlay (dropdowns), notifications, launcher
 	local overlay = new("Frame", { Name = "Overlay", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 50, Visible = false, Parent = gui })
 	self.Overlay = overlay
 	local catcher = new("TextButton", { Text = "", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = overlay })
@@ -1253,6 +1426,7 @@ function Library:CreateWindow(opts)
 	makeDraggable(launcher, launcher, function(c) return self:Track(c) end, function() self:Toggle() end)
 	self.Launcher = launcher
 
+	-- global input: menu key, keybind elements, capture, escape
 	self:Track(UserInputService.InputBegan:Connect(function(input)
 		if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 		if self._capture then self._capture(input.KeyCode) return end
@@ -1264,20 +1438,56 @@ function Library:CreateWindow(opts)
 		end
 	end))
 
+	-- spring engine for the page entrance animation
+	self:Track(RunService.RenderStepped:Connect(function(dt)
+		local list = self._springs
+		if #list == 0 then return end
+		dt = math.min(dt, 1 / 30)
+		local now = os.clock()
+		for i = #list, 1, -1 do
+			local s = list[i]
+			if not s.item.Parent then
+				table.remove(list, i)
+			elseif now >= s.start then
+				local steps = math.max(1, math.ceil(dt / (1 / 120)))
+				local h = dt / steps
+				for _ = 1, steps do
+					s.v += (-s.k * (s.x - s.goal) - s.c * s.v) * h
+					s.x += s.v * h
+				end
+				if math.abs(s.x - s.goal) < 0.4 and math.abs(s.v) < 3 then
+					s.item.Position = UDim2.new()
+					table.remove(list, i)
+				else
+					s.item.Position = UDim2.fromOffset(s.x, 0)
+				end
+			end
+		end
+	end))
+
+	-- unload hook for re-execution
 	self._genvUnload = function() self:Unload() end
 	genv.__HazerUnload = self._genvUnload
 	table.insert(Library._windows, self)
 
+	----------------------------------------------------------------------------
+	-- Built-in Settings page (always last)
+	----------------------------------------------------------------------------
 	local settings = self:_addNav("Settings", "Settings", "Appearance, controls and configuration", true)
 	self._navOrder = 10000
 
 	self:AddSection("Settings", "Appearance")
 	do
 		local page = settings
+		local swHolder = new("Frame", {
+			Name = "AccentTheme_Row", BackgroundTransparency = 1, AutomaticSize = Enum.AutomaticSize.Y,
+			Size = UDim2.new(1, 0, 0, 0), LayoutOrder = nextOrder(page), Parent = page.Frame,
+		})
 		local card = new("Frame", {
 			Name = "AccentTheme", BackgroundColor3 = WHITE, BackgroundTransparency = 0.93,
-			AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.new(1, -4, 0, 0), LayoutOrder = nextOrder(page), Parent = page.Frame,
+			AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.new(1, 0, 0, 0), Parent = swHolder,
 		})
+		table.insert(page.Items, card)
 		new("UIPadding", { PaddingBottom = UDim.new(0, 14), Parent = card })
 		label({ Text = "Accent & Background Theme", Font = FONT_M, TextSize = 13, Position = UDim2.fromOffset(14, 9), Size = UDim2.new(1, -28, 0, 18), Parent = card })
 		label({ Text = "Tints the whole menu. Saved automatically.", Font = FONT_R, TextSize = 11, TextColor3 = SUB, Position = UDim2.fromOffset(14, 28), Size = UDim2.new(1, -28, 0, 16), Parent = card })
@@ -1343,6 +1553,9 @@ function Library:CreateWindow(opts)
 		if not self.Current then self:Select("Settings") end
 	end)
 
+	----------------------------------------------------------------------------
+	-- Splash -> open -> welcome
+	----------------------------------------------------------------------------
 	task.spawn(function()
 		if opts.Splash ~= false then
 			local sp = new("Frame", {
