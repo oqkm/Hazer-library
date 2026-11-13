@@ -569,6 +569,7 @@ function Window:Select(nav)
 
 	local function show()
 		if self._selToken ~= token or self._unloaded then return end
+		self:_cancelExit()
 		for _, other in pairs(self.Pages) do
 			if other ~= p then
 				other.Frame.Visible = false
@@ -589,13 +590,22 @@ function Window:Select(nav)
 end
 
 -- YARHM-style exit: the first few rows slide out to the right, staggered.
+function Window:_cancelExit()
+	for _, tw in ipairs(self._exitTweens or {}) do
+		pcall(function() tw:Cancel() end)
+	end
+	self._exitTweens = {}
+end
+
 function Window:_exitPage(page)
 	self._springs = {}
+	self:_cancelExit()
+	local token = self._selToken
 	for i, it in ipairs(page.Items) do
 		if i > 7 then break end
 		task.delay((i - 1) * 0.012, function()
-			if it.Parent then
-				tween(it, 0.2, { Position = UDim2.fromScale(1.15, 0) }, Enum.EasingStyle.Cubic, IN)
+			if it.Parent and self._selToken == token then
+				table.insert(self._exitTweens, tween(it, 0.2, { Position = UDim2.fromScale(1.15, 0) }, Enum.EasingStyle.Cubic, IN))
 			end
 		end)
 	end
@@ -604,6 +614,7 @@ end
 -- YARHM-style entrance: rows fly in from the left on a bouncy spring, staggered.
 function Window:_enterPage(page)
 	self._springs = {}
+	self:_cancelExit()
 	local width = self._pageHolder.AbsoluteSize.X
 	if width <= 1 then width = (self._winW or 640) - 190 end
 	local startX = -(width / math.max(self._base, 0.3)) - 40
@@ -1272,6 +1283,7 @@ function Library:CreateWindow(opts)
 	self.Visible = false
 	self.Current = nil
 	self._springs = {}
+	self._exitTweens = {}
 
 	-- load saved settings (theme + menu key only)
 	local saved = Storage.load()
@@ -1337,11 +1349,15 @@ function Library:CreateWindow(opts)
 	end
 	self:_bindColor(main, "BackgroundColor3", "BG")
 
+	-- background layer: a CanvasGroup clips its children to the window's rounded corners
+	local bgLayer = new("CanvasGroup", { Name = "BG", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 0, Active = false, Parent = main })
+	new("UICorner", { CornerRadius = UDim.new(0, 20), Parent = bgLayer })
+
 	-- soft accent glow blobs (liquid look)
 	local function glow(anchor, pos, size)
 		local g = new("Frame", {
 			BackgroundColor3 = WHITE, BackgroundTransparency = 0, AnchorPoint = anchor, Position = pos,
-			Size = UDim2.fromOffset(size, size), ZIndex = 0, Active = false, Parent = main,
+			Size = UDim2.fromOffset(size, size), ZIndex = 0, Active = false, Parent = bgLayer,
 		})
 		new("UICorner", { CornerRadius = UDim.new(1, 0), Parent = g })
 		new("UIGradient", {
@@ -1357,7 +1373,8 @@ function Library:CreateWindow(opts)
 	self:_bindColor(glowB, "BackgroundColor3", "B")
 
 	-- sidebar
-	local sidebar = new("Frame", { Name = "Sidebar", BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.72, Size = UDim2.new(0, 170, 1, 0), Parent = main })
+	new("Frame", { Name = "SidebarBG", BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.72, Size = UDim2.new(0, 170, 1, 0), Parent = bgLayer })
+	local sidebar = new("Frame", { Name = "Sidebar", BackgroundTransparency = 1, Size = UDim2.new(0, 170, 1, 0), Parent = main })
 	new("Frame", { BackgroundColor3 = WHITE, BackgroundTransparency = 0.92, Position = UDim2.new(1, -1, 0, 0), Size = UDim2.new(0, 1, 1, 0), Parent = sidebar })
 	local brand = label({ Text = self.Name, Font = FONT_B, TextSize = 20, TextColor3 = WHITE, Position = UDim2.fromOffset(18, 16), Size = UDim2.new(1, -30, 0, 26), Parent = sidebar })
 	self:_bindGrad(new("UIGradient", { Parent = brand }))
