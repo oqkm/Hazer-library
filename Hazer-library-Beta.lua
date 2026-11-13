@@ -1234,13 +1234,15 @@ function Window:Notify(title, message, seconds)
 		})
 		tween(msgL, math.clamp(#message * 0.012, 0.3, 0.9), { MaxVisibleGraphemes = utf8.len(message) or #message }, QUART, OUT)
 	end
-	local prog = new("Frame", { BackgroundColor3 = WHITE, BackgroundTransparency = 0.25, Position = UDim2.new(0, 0, 1, -2), Size = UDim2.new(1, 0, 0, 2), Parent = card })
+	-- inset + rounded so it never pokes out past the card's rounded corners
+	local prog = new("Frame", { BackgroundColor3 = WHITE, BackgroundTransparency = 0.2, Position = UDim2.new(0, 16, 1, -9), Size = UDim2.new(1, -32, 0, 3), Parent = card })
+	new("UICorner", { CornerRadius = UDim.new(1, 0), Parent = prog })
 	new("UIGradient", { Color = ColorSequence.new(self.Theme.A, self.Theme.B), Parent = prog })
 
 	local pop = new("UIScale", { Scale = 0.85, Parent = card })
 	tween(pop, 0.7, { Scale = 1 }, BACK, OUT)
 	tween(card, 0.55, { Position = UDim2.fromOffset(0, 0) }, QUINT, OUT)
-	tween(prog, seconds, { Size = UDim2.new(0, 0, 0, 2) }, Enum.EasingStyle.Linear, OUT)
+	tween(prog, seconds, { Size = UDim2.new(0, 0, 0, 3) }, Enum.EasingStyle.Linear, OUT)
 	task.delay(seconds, function()
 		if not wrap.Parent then return end
 		tween(card, 0.4, { Position = UDim2.fromOffset(width + 40, 0) }, QUART, IN)
